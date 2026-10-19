@@ -1,0 +1,76 @@
+name: day4orch
+
+networks:
+  orch-net:
+    name: orch-net
+    driver: bridge
+    labels:
+      com.day4.lab: orchestration-lab
+
+volumes:
+  worker_state:
+
+services:
+  producer_service:
+    build:
+      context: .
+      dockerfile: producer/Dockerfile
+    image: producer-service:day4
+    container_name: producer_service
+    hostname: producer_service
+    networks:
+      - orch-net
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+    environment:
+      SERVICE_ROLE: producer
+      PRODUCER_PORT: "8080"
+      WORKER_HOSTNAME: worker_service
+      WORKER_PORT: "8082"
+      PRODUCER_RATE: "2"
+      LAB_NETWORK: orch-net
+      DATA_DIR: /app/data
+      TX_LOG: /app/data/transactions.log
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  worker_service:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    image: worker-service:day4
+    container_name: worker_service
+    hostname: worker_service
+    networks:
+      - orch-net
+    ports:
+      - "8082:8082"
+    volumes:
+      - ./data:/app/data:ro
+      - worker_state:/app/state
+    environment:
+      SERVICE_ROLE: worker
+      WORKER_PORT: "8082"
+      PRODUCER_HOSTNAME: producer_service
+      PRODUCER_PORT: "8080"
+      LAB_NETWORK: orch-net
+      DATA_DIR: /app/data
+      TX_LOG: /app/data/transactions.log
+      STATE_DIR: /app/state
+    depends_on:
+      producer_service:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
